@@ -77,11 +77,15 @@ class Recording(BaseModel):
         date_dir = output_dir / datetime.now().strftime(config.output.date_format)
         date_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate cast filename
+        # Generate cast filename: timestamp_hostname_session_windowid_windowname
+        # (window_id keeps names unique when two windows share a name)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
         display_name = self._get_display_name()
         safe_window_name = safe_filename(display_name)
-        cast_filename = f"{timestamp}_{safe_filename(self.hostname)}_{safe_filename(self.window_id)}_{safe_window_name}.cast"
+        cast_filename = (
+            f"{timestamp}_{safe_filename(self.hostname)}_{safe_filename(self.session_id)}"
+            f"_{safe_filename(self.window_id)}_{safe_window_name}.cast"
+        )
         cast_path = date_dir / cast_filename
         self.cast_path = str(cast_path)
 

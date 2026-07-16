@@ -17,12 +17,22 @@ recordings, start + stop them etc.
 You can start recording from the command line too:
 
 ```bash
-# Start recording
+# Start recording the current window
 tvmux rec
 # list ongoing recordings
 tvmux rec ls
-# stop them all, like you would a Docker container
-tvmux rec stop $(tvmux ls -q)
+# stop them all
+tvmux rec stop
+# or pick them off like Docker containers
+tvmux rec stop $(tvmux rec ls -q)
+```
+
+There's also a background server you can manage, and a CLI generated straight
+from its REST API if you want to poke at it:
+
+```bash
+tvmux server start|stop|status
+tvmux api --help
 ```
 
 By default, it'll save to `~/Videos/tmux/YYYY-MM/`. See all configuration options:
@@ -55,10 +65,3 @@ To customize, create `~/.tvmux.conf` or use environment variables like `TVMUX_OU
 | [🪟 textual](https://textualize.io/)                | TUI library for Python             |
 | [🗔  bittty](https://bitplane.net/dev/python/bittty) | My terminal                        |
 | [🎬 sh2mp4](https://bitplane.net/dev/sh/sh2mp4)     | Convert this to MP4 files          |
-
-## TODO
-
-### Prep for 0.6
-
-- [x] Need asciinema scrubber using bittty ([wip](https://github.com/ttygroup/textual-asciinema))
-- [ ] Start a basic TUI in Textual
