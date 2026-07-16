@@ -1,12 +1,10 @@
 """CRUD endpoints for managing tmux hooks."""
 import logging
-import subprocess
 import sys
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 
-from ..state import SERVER_HOST
 from ...config import get_config
 from ... import proc
 
@@ -61,39 +59,36 @@ AVAILABLE_HOOKS = {
 installed_hooks: Dict[str, Hook] = {}
 
 
-def build_hook_curl_command(hook_name: str, base_url: str) -> str:
-    """Build a tvmux CLI command for tmux hook callbacks.
+def build_hook_command(hook_name: str, port: int) -> str:
+    """Build the shell command tmux runs when a hook fires.
 
-    This function is extracted for testing and maintainability.
-    Returns a shell command string.
-
-    Note: base_url is kept for compatibility but not used with CLI approach.
+    Uses the lightweight ``tvmux.hook`` module (stdlib-only, ~30ms startup)
+    rather than the full CLI, since after-select-pane fires on every pane
+    switch. Values use tmux ``#{q:...}`` quoting and ``--flag=value`` form so
+    names containing spaces or quotes survive, and empty expansions can't
+    shift arguments.
     """
-    # Use tvmux CLI with the Python interpreter from sys.executable
-    # This ensures we use the correct Python even when tmux runs outside the venv
+    # sys.executable ensures the server's own interpreter (and venv) is used
+    # even though tmux runs the hook outside it.
     python_exe = sys.executable
 
-    # These are tmux format strings, not Python f-string variables!
-    # Arguments need to be JSON literals now - strings need quotes, empty dict for extra
-    # Redirect output to /dev/null to prevent cluttering the terminal
+    # The #{...} parts are tmux format strings, expanded when the hook fires.
     return (
-        f'{python_exe} -m tvmux.cli.main api hook create '
-        f'--hook-name \\"{hook_name}\\" '
-        '--session-name \\"#{session_name}\\" '
-        '--window-id \\"#{window_id}\\" '
-        '--pane-id \\"#{pane_id}\\" '
-        '--window-index \\"#{window_index}\\" '
-        '--pane-index \\"#{pane_index}\\" '
-        '--extra \\{\\} >/dev/null 2>&1'
+        f'{python_exe} -m tvmux.hook {hook_name} '
+        f'--port={port} '
+        '--session-name=#{q:session_name} '
+        '--window-id=#{q:window_id} '
+        '--pane-id=#{q:pane_id} '
+        '--window-index=#{q:window_index} '
+        '--pane-index=#{q:pane_index} '
+        '>/dev/null 2>&1'
     )
 
 
 def get_default_command(hook_name: str) -> str:
     """Get the default command for a hook."""
     config = get_config()
-    base_url = f"http://{SERVER_HOST}:{config.server.port}/hook"
-
-    return build_hook_curl_command(hook_name, base_url)
+    return build_hook_command(hook_name, config.server.port)
 
 
 def install_hook(hook: Hook) -> None:
@@ -114,7 +109,7 @@ def install_hook(hook: Hook) -> None:
 def uninstall_hook(hook_name: str) -> None:
     """Uninstall a tmux hook."""
     logger.info(f"Uninstalling hook {hook_name}")
-    subprocess.run(["tmux", "set-hook", "-gu", hook_name])
+    proc.run(["tmux", "set-hook", "-gu", hook_name])
 
 
 @router.get("")
@@ -267,3 +262,16 @@ def remove_all_hooks():
             uninstall_hook(hook_name)
 
     installed_hooks.clear()
+
+
+def remove_known_hooks():
+    """Unconditionally unset every hook tvmux could ever have installed.
+
+    Unlike remove_all_hooks() this doesn't consult the in-memory registry,
+    which is always empty at startup — it exists to clear hooks left in tmux
+    by a previous server that crashed without cleaning up.
+    """
+    logger.info("Removing any stale tvmux hooks from tmux...")
+
+    for hook_name in AVAILABLE_HOOKS:
+        proc.run(["tmux", "set-hook", "-gu", hook_name])

@@ -1,6 +1,5 @@
 """Single endpoint for receiving tmux hook events."""
 import logging
-from datetime import datetime
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -89,6 +88,9 @@ async def _process_hook_event(event: HookEvent) -> str:
                 recorder = recorders[recorder_key]
                 recorder.stop()
                 del recorders[recorder_key]
+        # session_name often expands empty by the time the session is gone;
+        # sweep for recordings whose windows no longer exist either way
+        cleanup_closed_windows()
         return "session_destroyed"
 
     elif hook_name == "after-select-pane":

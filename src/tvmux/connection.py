@@ -1,6 +1,7 @@
 """Connection to tvmux server."""
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -63,10 +64,11 @@ class Connection:
         # Log file for debugging
         log_file = self.server_dir / "server.log"
 
-        # Start server in background with logging
+        # Start server in background with logging; sys.executable rather than
+        # bare "python", which may not exist on PATH or point elsewhere
         with open(log_file, "w") as log:
             subprocess.Popen(
-                ["python", "-m", "tvmux.server.main"],
+                [sys.executable, "-m", "tvmux.server.main"],
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True

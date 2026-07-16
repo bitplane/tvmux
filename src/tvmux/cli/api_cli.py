@@ -4,7 +4,7 @@ import click
 import json
 import inspect
 import logging
-from typing import Any, Dict, Optional, get_type_hints, get_origin, get_args
+from typing import Union, get_origin, get_args
 from pydantic import BaseModel
 from fastapi.routing import APIRoute
 
@@ -25,22 +25,20 @@ def pydantic_to_click_options(model: type[BaseModel]):
         field_type = field_info.annotation
 
         # Determine Click type
-        if field_type == str:
+        if field_type is str:
             click_type = click.STRING
-        elif field_type == int:
+        elif field_type is int:
             click_type = click.INT
-        elif field_type == float:
+        elif field_type is float:
             click_type = click.FLOAT
-        elif field_type == bool:
+        elif field_type is bool:
             click_type = click.BOOL
         else:
-            # Handle Optional types
+            # Handle Optional[X] (i.e. Union[X, None])
             origin = get_origin(field_type)
-            if origin is type(Optional):
-                args = get_args(field_type)
-                if args[0] == str:
-                    click_type = click.STRING
-                elif args[0] == int:
+            if origin is Union:
+                args = [a for a in get_args(field_type) if a is not type(None)]
+                if args and args[0] is int:
                     click_type = click.INT
                 else:
                     click_type = click.STRING
@@ -114,15 +112,16 @@ def create_command_for_route(route: APIRoute):
             for field_name in body_model.model_fields:
                 # Click converts --hook-name to hook_name in kwargs, so use field_name directly
                 if field_name in kwargs and kwargs[field_name] is not None:
-                    logger.debug(f"Processing field {field_name} = {repr(kwargs[field_name])}")
-                    try:
-                        # Parse all arguments as JSON literals
-                        parsed_value = json.loads(kwargs[field_name])
-                        body[field_name] = parsed_value
-                        logger.debug(f"Successfully parsed {field_name} = {repr(parsed_value)}")
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Failed to parse {field_name} as JSON: {kwargs[field_name]} - {e}")
-                        raise
+                    value = kwargs[field_name]
+                    logger.debug(f"Processing field {field_name} = {repr(value)}")
+                    if isinstance(value, str):
+                        # Accept JSON literals for structured values, but fall
+                        # back to the raw string so plain values just work
+                        try:
+                            value = json.loads(value)
+                        except json.JSONDecodeError:
+                            pass
+                    body[field_name] = value
 
         # Log the API call
         logger.info(f"API call: {method} {path}")
@@ -157,7 +156,7 @@ def create_command_for_route(route: APIRoute):
                 try:
                     data = response.json()
                     click.echo(json.dumps(data, indent=2))
-                except:
+                except ValueError:
                     click.echo(response.text)
             else:
                 logger.error(f"API error {response.status_code}: {response.text}")
@@ -177,9 +176,9 @@ def create_command_for_route(route: APIRoute):
         param_type = param.annotation
 
         # Determine type
-        if param_type == int:
+        if param_type is int:
             click_type = click.INT
-        elif param_type == bool:
+        elif param_type is bool:
             click_type = click.BOOL
         else:
             click_type = click.STRING

@@ -1,8 +1,12 @@
 """Recording model for tvmux."""
 import asyncio
+import errno
+import fcntl
 import logging
 import os
 import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -119,6 +123,28 @@ class Recording(BaseModel):
         # Send SIGWINCH to the new pane's process group to trigger resize handling
         self._send_sigwinch(new_pane_id)
 
+    def _open_fifo_write(self, timeout: float = 2.0):
+        """Open the FIFO for writing without risking an indefinite hang.
+
+        A plain open(fifo, "w") blocks until a reader appears; if asciinema
+        died that blocks the server's event loop forever. Open with
+        O_NONBLOCK to fail fast when there's no reader, then restore
+        blocking mode so normal writes behave as before.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fd = os.open(self.fifo_path, os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError as e:
+                if e.errno != errno.ENXIO or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        fcntl.fcntl(fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+        return os.fdopen(fd, "w")
+
     def _send_sigwinch(self, pane_id: str):
         """Send SIGWINCH signal to asciinema process to handle terminal resize in recording."""
         if not self.asciinema_pid:
@@ -149,10 +175,10 @@ class Recording(BaseModel):
         # Close the FIFO by writing EOF to it - this will cause tail -f to exit
         try:
             # Write EOF to the FIFO to signal end of data
-            with open(self.fifo_path, 'w'):
+            with self._open_fifo_write(timeout=0.5):
                 pass  # Just opening and closing sends EOF
         except (OSError, IOError):
-            pass
+            pass  # No reader left - asciinema is already gone
 
         # Stop asciinema
         if self.asciinema_pid:
@@ -188,8 +214,10 @@ class Recording(BaseModel):
 
     async def _start_asciinema(self):
         """Start asciinema process."""
+        # asciinema is a Python dependency; run it via our own interpreter so
+        # it works even when the venv's bin dir isn't on PATH
         cmd = [
-            "asciinema", "rec", "--stdin", "--quiet", "--overwrite",
+            sys.executable, "-m", "asciinema", "rec", "--stdin", "--quiet", "--overwrite",
             str(self.cast_path), "--command", f"stdbuf -o0 tail -f {self.fifo_path}"
         ]
 
@@ -233,7 +261,7 @@ class Recording(BaseModel):
                 return
 
             # Phase 1: Write reset sequences and close
-            with open(self.fifo_path, "w") as f:
+            with self._open_fifo_write() as f:
                 # 1. Full terminal reset first
                 f.write("\033c")         # Full terminal reset (ESC c)
 
@@ -248,30 +276,32 @@ class Recording(BaseModel):
             # File handle closed, EOF sent to tail
 
             # Phase 2: Let tmux write normal screen content directly to FIFO
-            subprocess.run([
-                "tmux", "capture-pane", "-t", pane_target, "-e", "-p"
-            ], stdout=open(self.fifo_path, "w"), check=False)
-            # tmux opens FIFO, writes content, closes (EOF sent)
+            with self._open_fifo_write() as f:
+                subprocess.run([
+                    "tmux", "capture-pane", "-t", pane_target, "-e", "-p"
+                ], stdout=f, check=False)
+            # tmux writes content, we close (EOF sent)
 
             # Phase 3: Handle alternate screen if needed
             if alternate_on:
-                with open(self.fifo_path, "w") as f:
+                with self._open_fifo_write() as f:
                     f.write("\033[?1049h")   # Switch to alternate screen buffer
                     f.write("\033[2J\033[H") # Clear alternate screen
                     f.flush()
                 # File closed, EOF sent
 
                 # Let tmux write alternate screen content
-                subprocess.run([
-                    "tmux", "capture-pane", "-t", pane_target, "-a", "-e", "-p"
-                ], stdout=open(self.fifo_path, "w"), check=False)
-                # tmux writes alt content, closes (EOF sent)
+                with self._open_fifo_write() as f:
+                    subprocess.run([
+                        "tmux", "capture-pane", "-t", pane_target, "-a", "-e", "-p"
+                    ], stdout=f, check=False)
+                # tmux writes alt content, we close (EOF sent)
 
                 # Update cursor position for alt screen
                 cursor_x, cursor_y = alt_saved_x, alt_saved_y
 
             # Phase 4: Write final terminal setup and close
-            with open(self.fifo_path, "w") as f:
+            with self._open_fifo_write() as f:
                 # 5. Set scroll region if not full screen
                 if scroll_upper > 0 or scroll_lower < pane_height - 1:
                     # Convert to 1-based for terminal escape sequence
@@ -332,7 +362,7 @@ class Recording(BaseModel):
     def _write_reset_sequence(self):
         """Write terminal reset sequence to return to known state."""
         try:
-            with open(self.fifo_path, "w") as f:
+            with self._open_fifo_write(timeout=0.5) as f:
                 # 1. Disable alt mode (return to main buffer)
                 f.write("\033[?1049l")  # Disable alternate screen buffer
                 # 2. Clear the screen

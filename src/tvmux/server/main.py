@@ -67,8 +67,9 @@ async def lifespan(app: FastAPI):
     # Write PID file
     (server_dir / "server.pid").write_text(str(os.getpid()))
 
-    # Clean up any existing hooks first (in case of previous crash)
-    callbacks.remove_all_hooks()
+    # Clean up hooks left in tmux by a previously crashed server; the
+    # in-memory registry is empty here so remove_all_hooks() wouldn't work
+    callbacks.remove_known_hooks()
 
     # Set up default tmux hooks
     callbacks.setup_default_hooks()

@@ -9,11 +9,28 @@ import click
 from .server import server
 from .record import rec
 from .config import config
-from .api_cli import api
 from .tui import tui
 from ..config import load_config, set_config
 from ..connection import Connection
 from .. import __version__
+
+
+class LazyApiGroup(click.Group):
+    """Defers importing api_cli (which builds the whole FastAPI app to
+    introspect its routes) until an `api` subcommand is actually used."""
+
+    def _real(self) -> click.Group:
+        from .api_cli import api as real_api
+        return real_api
+
+    def list_commands(self, ctx):
+        return sorted(self._real().commands)
+
+    def get_command(self, ctx, name):
+        return self._real().get_command(ctx, name)
+
+
+api = LazyApiGroup(name="api", help="Direct API access for testing (auto-generated from routes).")
 
 
 def print_version(ctx, param, value):
@@ -72,7 +89,7 @@ def setup_client_logging(config):
         logger = logging.getLogger(__name__)
         logger.debug(f"Client logging initialized, command: {' '.join(sys.argv)}")
 
-    except Exception as e:
+    except Exception:
         # Fallback to basic console logging
         logging.basicConfig(level=logging.INFO)
         logging.getLogger(__name__).exception("Failed to setup client logging, using defaults")

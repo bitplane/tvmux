@@ -5,7 +5,6 @@ import subprocess
 import click
 
 from ..connection import Connection
-from ..server.routers.recording import RecordingCreate
 from ..config import get_config
 
 
@@ -49,23 +48,22 @@ def start():
             text=True,
             check=True
         )
-        session_name, window_id, pane_id = info.stdout.strip().split(":")
-    except subprocess.CalledProcessError:
+        # rsplit: window/pane ids are tmux-generated (@N/%N) and can't
+        # contain ":", but session names can
+        session_name, window_id, pane_id = info.stdout.strip().rsplit(":", 2)
+    except (subprocess.CalledProcessError, ValueError):
         click.echo("Failed to get tmux info", err=True)
         raise click.Abort()
 
-    # Call API to start recording
+    # Call API to start recording (fields match the RecordingCreate model;
+    # not imported here to keep FastAPI out of CLI startup)
     try:
-        # Create request data
-        request_data = RecordingCreate(
-            session_id=session_name,
-            window_id=window_id,
-            active_pane=pane_id
-        )
-
-        # Use Connection client to get status code
         api = conn.client()
-        response = api.post("/recordings/", json=request_data.model_dump())
+        response = api.post("/recordings/", json={
+            "session_id": session_name,
+            "window_id": window_id,
+            "active_pane": pane_id,
+        })
 
         if response.status_code in [201, 202]:
             recording_data = response.json()
