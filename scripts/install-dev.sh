@@ -2,11 +2,6 @@
 source .venv/bin/activate
 set -e
 
-# Install uv if not present (should be installed by venv.sh)
-if ! command -v uv >/dev/null 2>&1; then
-    pip install uv
-fi
-
 if command -v uv >/dev/null 2>&1; then
     PIP="uv pip"
 else
