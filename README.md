@@ -3,6 +3,8 @@
 Per-project/window `tmux` recorder using `asciinema`; records the current pane
 and follows the user around the current window.
 
+Requires Python 3.13 or newer and tmux.
+
 ## 🎥 Usage
 
 Install `tvmux` from pip or uv, or run standalone from `uvx`, like so:

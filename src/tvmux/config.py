@@ -1,17 +1,11 @@
 """Configuration management for tvmux."""
 import os
-import sys
+import tomllib
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from pydantic import BaseModel, Field
 import tomli_w
-
-# Handle tomllib import for Python 3.10
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 
 class OutputConfig(BaseModel):

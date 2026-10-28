@@ -71,7 +71,7 @@ def test_hook_module_imports_stay_light():
     """
     check = (
         "import sys; import tvmux.hook; "
-        "banned = {'click', 'fastapi', 'pydantic', 'textual', 'uvicorn', 'httpx', 'requests'}; "
+        "banned = {'click', 'fastapi', 'pydantic', 'textual', 'uvicorn', 'httpx', 'httpx2', 'requests'}; "
         "loaded = banned & {m.split('.')[0] for m in sys.modules}; "
         "assert not loaded, f'heavy modules imported: {loaded}'"
     )

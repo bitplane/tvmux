@@ -13,10 +13,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Set up Python 3.11
+      - name: Set up Python 3.13
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
+      - name: Install tmux for integration tests
+        run: sudo apt-get update && sudo apt-get install -y tmux
       - name: Build dev environment
         run: make dev
       - name: Unit tests

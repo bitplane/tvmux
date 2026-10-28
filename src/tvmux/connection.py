@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import httpx
+import httpx2
 
 from .server.state import SERVER_HOST
 from .utils import safe_filename
@@ -48,9 +48,9 @@ class Connection:
 
         # Try to connect to the server
         try:
-            response = httpx.get(f"{self.base_url}/", timeout=1.0, follow_redirects=True)
+            response = httpx2.get(f"{self.base_url}/", timeout=1.0, follow_redirects=True)
             return response.status_code == 200
-        except (httpx.RequestError, httpx.TimeoutException):
+        except (httpx2.RequestError, httpx2.TimeoutException):
             return False
 
     def start(self) -> bool:
@@ -119,11 +119,11 @@ class Connection:
             print(f"Error stopping server: {e}")
             return False
 
-    def client(self) -> httpx.Client:
+    def client(self) -> httpx2.Client:
         if not self.is_running:
             raise RuntimeError("Server not running")
 
-        return httpx.Client(base_url=self.base_url, follow_redirects=True)
+        return httpx2.Client(base_url=self.base_url, follow_redirects=True)
 
 
     def api(self):
@@ -131,6 +131,6 @@ class Connection:
         if not self.is_running:
             raise RuntimeError("Server not running")
 
-        # Just return the httpx client - we'll use it directly with the API
+        # Just return the httpx2 client - we'll use it directly with the API
         # The TestClient doesn't actually give us Python methods, it's still HTTP
         return self.client()

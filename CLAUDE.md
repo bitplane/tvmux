@@ -41,7 +41,7 @@ recordings (remove spam, reduce frame rate via bittty) and extract computer-use 
 
 **Fast hook poster (`src/tvmux/hook.py`):**
 - Invoked by tmux hooks as `python -m tvmux.hook` on every pane switch, so it MUST stay
-  stdlib-only (~30ms startup). Never import click/FastAPI/pydantic/textual/httpx here -
+  stdlib-only (~30ms startup). Never import click/FastAPI/pydantic/textual/httpx2 here -
   `tests/unit/test_hook_poster.py` has a guard test that fails if anything heavy sneaks in
 - POSTs hook events to the server's `/hook` endpoint; always exits 0 so a dead server
   never makes tmux print errors
@@ -146,7 +146,7 @@ Note: `auto_shutdown` is configurable but not currently implemented (see todo.md
 
 ## Development Notes
 
-- Python 3.11+ with type hints and Pydantic models
+- Python 3.13+ with type hints and Pydantic models
 - Async/await for server operations
 - Uses `make test` (pytest) for testing
 - Ruff for linting and formatting (120 char line length)
