@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -77,14 +78,13 @@ class Recording(BaseModel):
         date_dir = output_dir / datetime.now().strftime(config.output.date_format)
         date_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate cast filename: timestamp_hostname_session_windowid_windowname
-        # (window_id keeps names unique when two windows share a name)
+        # A unique suffix also distinguishes rapid restarts of the same window.
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
         display_name = self._get_display_name()
         safe_window_name = safe_filename(display_name)
         cast_filename = (
             f"{timestamp}_{safe_filename(self.hostname)}_{safe_filename(self.session_id)}"
-            f"_{safe_filename(self.window_id)}_{safe_window_name}.cast"
+            f"_{safe_filename(self.window_id)}_{safe_window_name}_{uuid4().hex}.cast"
         )
         cast_path = date_dir / cast_filename
         self.cast_path = str(cast_path)
@@ -221,7 +221,7 @@ class Recording(BaseModel):
         # asciinema is a Python dependency; run it via our own interpreter so
         # it works even when the venv's bin dir isn't on PATH
         cmd = [
-            sys.executable, "-m", "asciinema", "rec", "--stdin", "--quiet", "--overwrite",
+            sys.executable, "-m", "asciinema", "rec", "--stdin", "--quiet",
             str(self.cast_path), "--command", f"stdbuf -o0 tail -f {self.fifo_path}"
         ]
 
