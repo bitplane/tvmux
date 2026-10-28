@@ -1,5 +1,7 @@
 """CRUD endpoints for managing tmux hooks."""
 import logging
+import shlex
+import subprocess
 import sys
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -91,25 +93,58 @@ def get_default_command(hook_name: str) -> str:
     return build_hook_command(hook_name, config.server.port)
 
 
+# Keep tvmux in its own array entry, with an explicit marker for custom commands.
+HOOK_MARKER = ": tvmux-owned-hook; "
+HOOK_INDEX = 21590
+
+
+def _hook_entries(hook_name: str) -> dict[str, str]:
+    result = proc.run(["tmux", "show-hooks", "-g", hook_name])
+    if result.returncode != 0:
+        # tmux may not have started yet, or its last session may have closed.
+        return {}
+    entries = {}
+    for line in result.stdout.splitlines():
+        name, _, command = line.partition(" ")
+        if name.startswith(f"{hook_name}["):
+            entries[name] = command
+    return entries
+
+
+def _owned_command(command: str) -> bool:
+    # Recognize default commands left by older releases as well as marked hooks.
+    return HOOK_MARKER in command or "-m tvmux.hook " in command
+
+
 def install_hook(hook: Hook) -> None:
-    """Install a tmux hook."""
+    """Install a hook without replacing user or plugin hook array entries."""
     if not hook.enabled:
         return
 
-    command = hook.command or get_default_command(hook.name)
+    entries = _hook_entries(hook.name)
+    for name, command in entries.items():
+        if _owned_command(command):
+            proc.run(["tmux", "set-hook", "-gu", name], check=True)
 
-    logger.info(f"Installing hook {hook.name}")
-    logger.debug(f"Hook command: {command}")
+    occupied = {name for name, command in entries.items() if not _owned_command(command)}
+    index = HOOK_INDEX
+    while f"{hook.name}[{index}]" in occupied:
+        index += 1
 
-    # Set the hook using tmux
-    # Use single quotes for run-shell to avoid conflicts with double quotes in command
-    proc.run(["tmux", "set-hook", "-g", hook.name, f"run-shell '{command}'"])
+    command = HOOK_MARKER + (hook.command or get_default_command(hook.name))
+    logger.info(f"Installing hook {hook.name}[{index}]")
+    proc.run([
+        "tmux", "set-hook", "-g", f"{hook.name}[{index}]",
+        f"run-shell {shlex.quote(command)}",
+    ], check=True)
 
 
 def uninstall_hook(hook_name: str) -> None:
-    """Uninstall a tmux hook."""
-    logger.info(f"Uninstalling hook {hook_name}")
-    proc.run(["tmux", "set-hook", "-gu", hook_name])
+    """Remove only entries owned by tvmux, including stale default commands."""
+    for name, command in _hook_entries(hook_name).items():
+        if _owned_command(command):
+            # tmux can exit between the query and removal during shutdown.
+            proc.run(["tmux", "set-hook", "-gu", name])
 
 
 @router.get("")
@@ -248,7 +283,11 @@ def setup_default_hooks():
                 enabled=True,
                 description=AVAILABLE_HOOKS[hook_name]
             )
-            install_hook(hook)
+            try:
+                install_hook(hook)
+            except subprocess.CalledProcessError:
+                logger.warning(f"Could not install default hook {hook_name}; tmux may not be running")
+                continue
             installed_hooks[hook_name] = hook
             logger.debug(f"Installed default hook: {hook_name}")
 
@@ -265,13 +304,7 @@ def remove_all_hooks():
 
 
 def remove_known_hooks():
-    """Unconditionally unset every hook tvmux could ever have installed.
-
-    Unlike remove_all_hooks() this doesn't consult the in-memory registry,
-    which is always empty at startup — it exists to clear hooks left in tmux
-    by a previous server that crashed without cleaning up.
-    """
+    """Remove stale tvmux entries without touching hooks owned by others."""
     logger.info("Removing any stale tvmux hooks from tmux...")
-
     for hook_name in AVAILABLE_HOOKS:
-        proc.run(["tmux", "set-hook", "-gu", hook_name])
+        uninstall_hook(hook_name)

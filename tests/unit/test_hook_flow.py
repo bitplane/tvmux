@@ -48,15 +48,27 @@ class TestBuildHookCommand:
 
 
 class TestRemoveKnownHooks:
-    def test_unsets_every_known_hook_regardless_of_registry(self, monkeypatch):
+    def test_removes_only_owned_entries_regardless_of_registry(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(callbacks.proc, "run", lambda cmd, **kw: calls.append(cmd))
 
-        callbacks.installed_hooks.clear()  # simulates fresh start after a crash
+        def run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[1] == "show-hooks":
+                name = cmd[3]
+                return MagicMock(returncode=0, stdout=(
+                    f'{name}[0] display-message "user hook"\n'
+                    f'{name}[42] run-shell "python -m tvmux.hook {name}"\n'
+                    f'{name}[21590] run-shell ": tvmux-owned-hook; custom"\n'
+                ))
+            return MagicMock(stdout="")
+
+        monkeypatch.setattr(callbacks.proc, "run", run)
+        callbacks.installed_hooks.clear()
         callbacks.remove_known_hooks()
-
         unset = {cmd[3] for cmd in calls if cmd[:3] == ["tmux", "set-hook", "-gu"]}
-        assert unset == set(callbacks.AVAILABLE_HOOKS)
+        assert unset == {
+            f"{name}[{index}]" for name in callbacks.AVAILABLE_HOOKS for index in (42, 21590)
+        }
 
 
 class TestHookEndpoint:

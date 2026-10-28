@@ -48,7 +48,7 @@ recordings (remove spam, reduce frame rate via bittty) and extract computer-use 
 
 **FastAPI Server (`src/tvmux/server/`):**
 - `main.py` - FastAPI application with lifespan management; installs tmux hooks on startup
-  (after unconditionally sweeping stale hooks left by a crashed server) and removes them on shutdown
+  (after removing only tvmux-owned stale hook entries left by a crashed server) and removes them on shutdown
 - `state.py` - Global state: the `recorders` dict keyed by `"session:window_id"`
 - `window_monitor.py` - Sweeps recordings whose tmux windows no longer exist
 - `routers/` - REST API endpoints:
