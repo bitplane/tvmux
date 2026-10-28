@@ -63,43 +63,70 @@ class Recording(BaseModel):
         if self.active:
             raise ValueError(f"Already recording {self.id}")
 
-        self.output_dir = output_dir
-        self.active_pane = active_pane
+        try:
+            self.output_dir = output_dir
+            self.active_pane = active_pane
 
-        # Create FIFO
-        safe_window_id = safe_filename(self.window_id)
-        self.fifo_path = self.session_dir / f"window_{safe_window_id}.fifo"
-        if self.fifo_path.exists():
-            self.fifo_path.unlink()
-        os.mkfifo(self.fifo_path)
+            # Create FIFO
+            safe_window_id = safe_filename(self.window_id)
+            self.fifo_path = self.session_dir / f"window_{safe_window_id}.fifo"
+            if self.fifo_path.exists():
+                self.fifo_path.unlink()
+            os.mkfifo(self.fifo_path)
 
-        # Create output directory with date
-        config = get_config()
-        date_dir = output_dir / datetime.now().strftime(config.output.date_format)
-        date_dir.mkdir(parents=True, exist_ok=True)
+            # Create output directory with date
+            config = get_config()
+            date_dir = output_dir / datetime.now().strftime(config.output.date_format)
+            date_dir.mkdir(parents=True, exist_ok=True)
 
-        # A unique suffix also distinguishes rapid restarts of the same window.
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-        display_name = self._get_display_name()
-        safe_window_name = safe_filename(display_name)
-        cast_filename = (
-            f"{timestamp}_{safe_filename(self.hostname)}_{safe_filename(self.session_id)}"
-            f"_{safe_filename(self.window_id)}_{safe_window_name}_{uuid4().hex}.cast"
-        )
-        cast_path = date_dir / cast_filename
-        self.cast_path = str(cast_path)
+            # A unique suffix also distinguishes rapid restarts of the same window.
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+            display_name = self._get_display_name()
+            safe_window_name = safe_filename(display_name)
+            cast_filename = (
+                f"{timestamp}_{safe_filename(self.hostname)}_{safe_filename(self.session_id)}"
+                f"_{safe_filename(self.window_id)}_{safe_window_name}_{uuid4().hex}.cast"
+            )
+            cast_path = date_dir / cast_filename
+            self.cast_path = str(cast_path)
 
-        # Start asciinema process
-        await self._start_asciinema()
+            # Start asciinema process
+            await self._start_asciinema()
 
-        # Wait for asciinema to be ready
-        if not await self._wait_for_reader():
-            raise RuntimeError("Asciinema reader not ready")
+            # Wait for asciinema to be ready
+            if not await self._wait_for_reader():
+                raise RuntimeError("Asciinema reader not ready")
 
-        self.active = True
-        self._dump_pane(active_pane)
-        self._start_streaming(active_pane)
-        logger.info(f"Started recording window {self.window_id} to {cast_path}")
+            self.active = True
+            self._dump_pane(active_pane)
+            self._start_streaming(active_pane)
+            logger.info(f"Started recording window {self.window_id} to {cast_path}")
+        except BaseException:
+            # Cancellation also needs rollback; the API has not registered us yet.
+            self._cleanup_failed_start()
+            raise
+
+    def _cleanup_failed_start(self):
+        """Release partially acquired resources without blocking on FIFO writes."""
+        if self.active:
+            try:
+                self._stop_streaming()
+            except Exception:
+                logger.exception("Failed to stop streaming after startup failure")
+        if self.asciinema_pid is not None:
+            try:
+                bg.terminate(self.asciinema_pid)
+            except Exception:
+                logger.exception("Failed to terminate recorder after startup failure")
+            finally:
+                self.asciinema_pid = None
+        if self.fifo_path is not None:
+            try:
+                self.fifo_path.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Failed to remove FIFO after startup failure")
+        self.active = False
+        self.active_pane = None
 
     def switch_pane(self, new_pane_id: str):
         """Switch recording to a different pane in the window."""
@@ -225,7 +252,22 @@ class Recording(BaseModel):
             str(self.cast_path), "--command", f"stdbuf -o0 tail -f {self.fifo_path}"
         ]
 
-        proc = await run_bg(cmd)
+        # Cancelling an executor await doesn't cancel Popen. Wait for the result
+        # so rollback always knows the PID, even if cancellation races spawning.
+        spawn = asyncio.create_task(run_bg(cmd))
+        try:
+            proc = await asyncio.shield(spawn)
+        except asyncio.CancelledError:
+            # Repeated cancellations must not cancel the executor's wrapper
+            # task either: Popen may still be running in its worker thread.
+            while not spawn.done():
+                try:
+                    await asyncio.shield(spawn)
+                except asyncio.CancelledError:
+                    continue
+            proc = spawn.result()
+            self.asciinema_pid = proc.pid
+            raise
         self.asciinema_pid = proc.pid
         logger.info(f"Started asciinema process: {self.asciinema_pid}")
 
