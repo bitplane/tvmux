@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from typing import Optional
+from weakref import WeakValueDictionary
 
 from ...models import Recording
 from ..state import recorders
@@ -64,6 +65,9 @@ def display_name(session_id: str, window_id: str) -> str:
 
 router = APIRouter()
 
+# Requests retain their lock while waiting or starting; unused locks disappear.
+_start_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
 
 class RecordingCreate(BaseModel):
     """Request to start recording a window."""
@@ -76,6 +80,14 @@ class RecordingCreate(BaseModel):
 @router.post("", response_model=Recording)
 async def create_recording(request: RecordingCreate, response: Response) -> Recording:
     """Start a new recording."""
+    recording_id = f"{request.session_id}:{request.window_id}"
+    lock = _start_locks.setdefault(recording_id, asyncio.Lock())
+    async with lock:
+        return await _create_recording(request, response)
+
+
+async def _create_recording(request: RecordingCreate, response: Response) -> Recording:
+    """Check and start while holding this window's startup lock."""
 
     # Auto-detect active pane if not provided
     active_pane = request.active_pane
