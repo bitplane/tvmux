@@ -112,7 +112,7 @@ recordings (remove spam, reduce frame rate via bittty) and extract computer-use 
 2. When recording starts, creates FIFO and launches asciinema (via `sys.executable -m asciinema`)
 3. Dumps initial pane state (content + cursor position) to FIFO
 4. Starts `tmux pipe-pane` to stream live output to FIFO
-5. On pane switches (`after-select-pane` events), stops old stream, dumps new state, starts new stream
+5. On pane switches (`window-pane-changed` events, including splits and pane exits), stops old stream, dumps new state, starts new stream
 6. On stop, sends terminal reset sequences and repairs cast file
 
 ## Output Organization

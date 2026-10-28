@@ -72,12 +72,13 @@ class TestRemoveKnownHooks:
 
 
 class TestHookEndpoint:
-    def test_select_pane_switches_recording(self, client):
+    @pytest.mark.parametrize("hook_name", ["after-select-pane", "window-pane-changed"])
+    def test_select_pane_switches_recording(self, client, hook_name):
         recorder = MagicMock()
         recorders["main:@1"] = recorder
 
         resp = client.post("/hook", json={
-            "hook_name": "after-select-pane",
+            "hook_name": hook_name,
             "session_name": "main",
             "window_id": "@1",
             "pane_id": "%5",
@@ -133,3 +134,19 @@ class TestHookEndpoint:
 
         assert resp.status_code == 200
         assert resp.json()["action"] == "unknown_hook_made-up-hook"
+
+
+def test_default_hooks_follow_all_active_pane_changes(monkeypatch):
+    installed = []
+    monkeypatch.setattr(callbacks, "installed_hooks", {})
+    monkeypatch.setattr(callbacks, "install_hook", lambda hook: installed.append(hook.name))
+    callbacks.setup_default_hooks()
+    assert "window-pane-changed" in installed
+
+
+def test_window_closed_sweeps_without_another_pane_switch(client, monkeypatch):
+    cleanup = MagicMock()
+    monkeypatch.setattr("tvmux.server.routers.hook.cleanup_closed_windows", cleanup)
+    response = client.post("/hook", json={"hook_name": "window-unlinked"})
+    assert response.status_code == 200
+    cleanup.assert_called_once()

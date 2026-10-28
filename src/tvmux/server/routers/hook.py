@@ -72,7 +72,7 @@ async def _process_hook_event(event: HookEvent) -> str:
 
     elif hook_name == "window-unlinked":
         logger.debug(f"Window unlinked from session {event.session_name}")
-        # The cleanup will happen on the next pane switch
+        cleanup_closed_windows()
         return "window_unlinked"
 
     elif hook_name == "session-closed":
@@ -93,7 +93,7 @@ async def _process_hook_event(event: HookEvent) -> str:
         cleanup_closed_windows()
         return "session_destroyed"
 
-    elif hook_name == "after-select-pane":
+    elif hook_name in ("after-select-pane", "window-pane-changed"):
         # Active pane changed within a window
         logger.debug(
             f"Pane selection changed to {event.pane_id} "

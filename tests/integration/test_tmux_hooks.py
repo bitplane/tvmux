@@ -71,3 +71,64 @@ def test_hook_lifecycle_tolerates_tmux_not_running(tmux, monkeypatch):
     callbacks.remove_known_hooks()
     callbacks.setup_default_hooks()
     assert not callbacks.installed_hooks
+
+
+def test_native_pane_hook_follows_split_kill_and_shell_exit(tmux, monkeypatch):
+    import asyncio
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from queue import Queue
+    from unittest.mock import Mock
+
+    from tvmux.server.routers import hook
+    from tvmux.server.state import recorders
+
+    events = Queue()
+
+    class Receiver(BaseHTTPRequestHandler):
+        def do_POST(self):
+            events.put(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Receiver)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    recorder = Mock()
+    recorders["review:@0"] = recorder
+    monkeypatch.setattr(hook, "cleanup_closed_windows", lambda: None)
+    monkeypatch.setattr(callbacks, "get_default_command",
+                        lambda name: callbacks.build_hook_command(name, server.server_port))
+    try:
+        # Keep a different window selected to verify the event target is used.
+        tmux("new-window", "-t", "review", "-n", "other", check=True)
+        callbacks.install_hook(callbacks.Hook(name="window-pane-changed"))
+
+        def assert_followed():
+            event = hook.HookEvent(**events.get(timeout=5))
+            expected = tmux("display-message", "-p", "-t", "review:@0", "#{pane_id}").stdout.strip()
+            assert event.session_name == "review"
+            assert event.window_id == "@0"
+            assert event.pane_id == expected
+            asyncio.run(hook._process_hook_event(event))
+            recorder.switch_pane.assert_called_with(expected)
+
+        tmux("split-window", "-t", "review:@0", check=True)
+        assert_followed()
+        tmux("kill-pane", "-t", "review:@0", check=True)
+        assert_followed()
+        tmux("split-window", "-t", "review:@0", check=True)
+        assert_followed()
+        tmux("send-keys", "-t", "review:@0", "exit", "Enter", check=True)
+        assert_followed()
+        assert recorder.switch_pane.call_count == 4
+    finally:
+        callbacks.uninstall_hook("window-pane-changed")
+        recorders.clear()
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()

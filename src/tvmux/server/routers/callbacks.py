@@ -48,6 +48,7 @@ AVAILABLE_HOOKS = {
     "after-rename-window": "Fired when a window is renamed",
     "after-rename-session": "Fired when a session is renamed",
     "after-select-pane": "Fired when the active pane changes",
+    "window-pane-changed": "Fired whenever a window's active pane changes",
     "window-unlinked": "Fired when a window is unlinked from a session",
     "session-closed": "Fired when a session ends",
     "pane-mode-changed": "Fired when pane mode changes",
@@ -271,7 +272,7 @@ def setup_default_hooks():
 
     # Default hooks needed for tvmux to function
     default_hooks = [
-        "after-select-pane",  # Essential for pane switching
+        "window-pane-changed",  # Includes splits, kills, and shell exits
         "session-closed",     # Essential for cleanup
         "window-unlinked",    # Helpful for cleanup
     ]
