@@ -1,7 +1,7 @@
 [project]
 name = "tvmux"
 description = "terminal multiplexer recorder"
-version = "0.6.3"
+version = "0.7.0"
 authors = [
     { name = "Gareth Davidson", email = "gaz@bitplane.net" }
 ]
